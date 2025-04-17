@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Soulfall: The Cluster of Stars</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>body { margin: 0; overflow: hidden; } canvas { display: block; }</style>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.js"></script>
+</head>
+<body>
+<script>
+let game;
+let gameStarted = false;
+
+window.onload = () => {
+  const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 480,
+    backgroundColor: '#000000',
+    physics: {
+      default: 'arcade',
+      arcade: { gravity: { y: 800 }, debug: false }
+    },
+    scene: [TitleScene, GameScene],
+    scale: {
+      mode: Phaser.Scale.FIT,
+      autoCenter: Phaser.Scale.CENTER_BOTH
+    }
+  };
+  game = new Phaser.Game(config);
+};
+
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+
+  preload() {
+    this.load.image('starrybg', 'https://i.imgur.com/M6rTrww.png');
+  }
+
+  create() {
+    this.add.image(400, 240, 'starrybg').setDisplaySize(800, 480);
+
+    this.add.text(400, 140, 'Soulfall', {
+      font: '48px serif',
+      fill: '#ffffff'
+    }).setOrigin(0.5);
+
+    this.add.text(400, 200, 'The Cluster of Stars', {
+      font: '24px serif',
+      fill: '#aaaaff'
+    }).setOrigin(0.5);
+
+    this.add.text(400, 280, 'A world broken. A sky cursed.', {
+      font: '18px serif',
+      fill: '#ccccff'
+    }).setOrigin(0.5);
+
+    this.add.text(400, 310, 'Rise, or be forgotten.', {
+      font: '18px serif',
+      fill: '#ccccff'
+    }).setOrigin(0.5);
+
+    const startText = this.add.text(400, 380, 'Tap to Begin', {
+      font: '20px Arial',
+      fill: '#ffffff'
+    }).setOrigin(0.5);
+
+    this.input.keyboard.on('keydown', () => this.scene.start('GameScene'));
+    this.input.on('pointerdown', () => this.scene.start('GameScene'));
+
+    // Simple flicker effect
+    this.time.addEvent({
+      delay: 600,
+      callback: () => startText.setVisible(!startText.visible),
+      loop: true
+    });
+  }
+}
+
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  preload() {
+    this.load.spritesheet('knight', 'https://i.imgur.com/T6J2VUp.png', { frameWidth: 32, frameHeight: 32 });
+    this.load.image('ground', 'https://i.imgur.com/1cXfkkF.png');
+    this.load.image('boss', 'https://i.imgur.com/7auuwE4.png');
+    this.load.image('bg', 'https://i.imgur.com/M6rTrww.png'); // Starry pixel background
+    this.load.spritesheet('slash', 'https://i.imgur.com/TsT60kj.png', { frameWidth: 32, frameHeight: 32 });
+  }
+
+  create() {
+    this.add.image(400, 240, 'bg').setDisplaySize(800, 480).setDepth(-10);
+
+    const platforms = this.physics.add.staticGroup();
+    platforms.create(400, 460, 'ground').setScale(5, 1).refreshBody();
+
+    this.player = this.physics.add.sprite(100, 300, 'knight').setScale(2).setCollideWorldBounds(true);
+    this.physics.add.collider(this.player, platforms);
+
+    this.anims.create({ key: 'idle', frames: this.anims.generateFrameNumbers('knight', { start: 0, end: 3 }), frameRate: 6, repeat: -1 });
+    this.anims.create({ key: 'run', frames: this.anims.generateFrameNumbers('knight', { start: 4, end: 7 }), frameRate: 10, repeat: -1 });
+    this.anims.create({ key: 'attack', frames: this.anims.generateFrameNumbers('knight', { start: 8, end: 13 }), frameRate: 12, repeat: 0 });
+    this.anims.create({ key: 'slash_fx', frames: this.anims.generateFrameNumbers('slash', { start: 0, end: 4 }), frameRate: 20, repeat: 0 });
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.attackKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+    this.boss = this.physics.add.sprite(600, 300, 'boss').setScale(2).setCollideWorldBounds(true);
+    this.physics.add.collider(this.boss, platforms);
+    this.physics.add.overlap(this.player, this.boss, () => this.damagePlayer());
+
+    this.slashFX = this.add.sprite(0, 0, 'slash').setVisible(false);
+
+    this.playerHealth = 100;
+    this.stamina = 100;
+    this.bossHealth = 100;
+    this.isAttacking = false;
+
+    this.healthBar = this.add.graphics();
+    this.staminaBar = this.add.graphics();
+    this.hudText = this.add.text(20, 70, '', { font: '16px Arial', fill: '#fff' });
+    this.levelCompleteText = this.add.text(400, 240, '', { font: '20px Arial', fill: '#fff' }).setOrigin(0.5);
+
+    this.updateHUD();
+  }
+
+  update() {
+    if (!this.player.active || !this.boss.active) return;
+
+    let moving = false;
+
+    if (this.cursors.left.isDown) {
+      this.player.setVelocityX(-160);
+      this.player.anims.play('run', true);
+      this.player.setFlipX(true);
+      moving = true;
+    } else if (this.cursors.right.isDown) {
+      this.player.setVelocityX(160);
+      this.player.anims.play('run', true);
+      this.player.setFlipX(false);
+      moving = true;
+    } else {
+      this.player.setVelocityX(0);
+    }
+
+    if (!moving && !this.isAttacking) {
+      this.player.anims.play('idle', true);
+    }
+
+    if (this.cursors.up.isDown && this.player.body.onFloor()) {
+      this.player.setVelocityY(-400);
+    }
+
+    if (!this.isAttacking && Phaser.Input.Keyboard.JustDown(this.attackKey) && this.stamina >= 20) {
+      this.isAttacking = true;
+      this.stamina -= 20;
+      this.player.anims.play('attack', true);
+
+      this.slashFX.setPosition(this.player.x + (this.player.flipX ? -32 : 32), this.player.y);
+      this.slashFX.setFlipX(this.player.flipX);
+      this.slashFX.setVisible(true).play('slash_fx');
+
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.boss.x, this.boss.y);
+      if (dist < 50) {
+        this.boss.setTint(0xff4444);
+        this.time.delayedCall(200, () => this.boss.clearTint());
+        this.time.delayedCall(250, () => this.bossDamage());
+      }
+
+      this.time.delayedCall(400, () => {
+        this.isAttacking = false;
+      });
+    }
+
+    this.updateHUD();
+  }
+
+  bossDamage() {
+    this.bossHealth -= 20;
+    if (this.bossHealth <= 0) {
+      this.boss.disableBody(true, true);
+      this.levelCompleteText.setText('Boss Defeated! Victory!');
+    }
+  }
+
+  damagePlayer() {
+    if (this.playerHealth > 0) {
+      this.playerHealth -= 1;
+      this.updateHUD();
+    }
+    if (this.playerHealth <= 0) {
+      this.player.setTint(0xff0000);
+      this.player.setVelocity(0, 0);
+      this.player.anims.stop();
+      this.player.active = false;
+      this.time.delayedCall(1000, () => {
+        this.player.clearTint();
+        this.playerHealth = 100;
+        this.stamina = 100;
+        this.player.setPosition(100, 300);
+        this.player.active = true;
+      });
+    }
+  }
+
+  updateHUD() {
+    this.healthBar.clear();
+    this.healthBar.fillStyle(0xff4444).fillRect(20, 20, this.playerHealth * 2, 20);
+    this.healthBar.lineStyle(2, 0xffffff).strokeRect(20, 20, 200, 20);
+
+    this.staminaBar.clear();
+    this.staminaBar.fillStyle(0x44ff44).fillRect(20, 50, this.stamina * 2, 15);
+    this.staminaBar.lineStyle(2, 0xffffff).strokeRect(20, 50, 200, 15);
+
+    this.hudText.setText(`Stamina: ${this.stamina}`);
+  }
+}
+</script>
+</body>
+</html>
